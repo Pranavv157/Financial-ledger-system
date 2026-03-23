@@ -8,7 +8,7 @@ from .serializers import TransferSerializer
 
 from rest_framework import status
 
-from .selectors import get_account_balance
+from .ledger_selectors import get_account_balance
 
 
 class TransferAPIView(APIView):

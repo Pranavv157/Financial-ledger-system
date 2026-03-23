@@ -2,7 +2,7 @@ from django.db import transaction, IntegrityError
 from decimal import Decimal
 
 from .models import LedgerAccount, Transaction, TransactionEntry
-from .selectors import get_account_balance
+from .ledger_selectors import get_account_balance
 from .validators import validate_transaction_balance
 
 

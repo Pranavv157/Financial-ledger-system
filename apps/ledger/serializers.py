@@ -21,3 +21,4 @@ class TransactionEntrySerializer(serializers.ModelSerializer):
             "amount",
             "created_at"
         ]
+
