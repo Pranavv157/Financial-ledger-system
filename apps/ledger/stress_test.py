@@ -53,7 +53,7 @@ for i in range(20):
     t = threading.Thread(target=send_transfer)
     threads.append(t)
     t.start()
-      # Small delay to avoid overwhelming the server
+     
 
 for t in threads:
     t.join()
