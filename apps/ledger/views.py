@@ -1,5 +1,6 @@
 import logging
 
+from django.core.paginator import Paginator
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -10,8 +11,11 @@ from .exceptions import InsufficientFundsError, InvalidTransferError
 from .ledger_selectors import get_account_balance
 from .models import LedgerAccount, TransactionEntry
 
+from .pagination import TransactionPagination
+
 
 logger = logging.getLogger(__name__)
+
 
 
 class TransferAPIView(APIView):
@@ -90,6 +94,8 @@ class AccountTransactionsAPIView(APIView):
             .order_by("-created_at")
         )
 
-        serializer = TransactionEntrySerializer(entries, many=True)
+        paginator =TransactionPagination()
+        paginated_entries=paginator.paginate_queryset(entries,request)
+        serializer = TransactionEntrySerializer(paginated_entries, many=True)
 
-        return Response(serializer.data)
+        return paginator.get_paginated_response(serializer.data)
