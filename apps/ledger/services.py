@@ -4,6 +4,7 @@ from decimal import Decimal
 from .models import LedgerAccount, Transaction, TransactionEntry
 from .ledger_selectors import get_account_balance
 from .validators import validate_transaction_balance
+from .exceptions import InsufficientFundsError, InvalidTransferError
 
 
 def transfer_funds(sender_id, receiver_id, amount, reference_id):
@@ -11,10 +12,10 @@ def transfer_funds(sender_id, receiver_id, amount, reference_id):
     amount = Decimal(amount)
 
     if amount <= 0:
-        raise ValueError("Amount must be positive")
+        raise InvalidTransferError("Amount must be positive")
 
     if sender_id == receiver_id:
-        raise ValueError("Sender and receiver cannot be the same")
+        raise InvalidTransferError("Sender and receiver cannot be the same")
 
     # idempotency check
     existing = Transaction.objects.filter(reference_id=reference_id).first()
@@ -23,7 +24,6 @@ def transfer_funds(sender_id, receiver_id, amount, reference_id):
 
     with transaction.atomic():
 
-        # lock accounts in consistent order
         account_ids = sorted([sender_id, receiver_id])
 
         accounts = (
@@ -36,27 +36,25 @@ def transfer_funds(sender_id, receiver_id, amount, reference_id):
         accounts_map = {a.id: a for a in accounts}
 
         if len(accounts_map) != 2:
-            raise ValueError("Invalid accounts")
+            raise InvalidTransferError("Invalid accounts")
 
         sender = accounts_map[sender_id]
         receiver = accounts_map[receiver_id]
 
-        # check sender balance
+        # balance check
         balance = get_account_balance(sender)
 
         if balance < amount:
-            raise ValueError("Insufficient funds")
+            raise InsufficientFundsError("Insufficient funds")
 
         try:
             txn = Transaction.objects.create(
                 reference_id=reference_id,
                 status=Transaction.Status.PENDING
             )
-
         except IntegrityError:
             return Transaction.objects.get(reference_id=reference_id)
 
-        # prepare ledger entries
         entries = [
             {
                 "account": sender,
@@ -70,10 +68,8 @@ def transfer_funds(sender_id, receiver_id, amount, reference_id):
             },
         ]
 
-        # validate double entry rule
         validate_transaction_balance(entries)
 
-        # create entries
         for entry in entries:
             TransactionEntry.objects.create(
                 transaction=txn,

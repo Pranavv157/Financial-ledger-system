@@ -66,6 +66,10 @@ class TransactionEntry(models.Model):
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
-
+    class Meta:
+        indexes = [
+            models.Index(fields=["account", "created_at"]),
+        ]
+    
     def __str__(self):
         return f"{self.account} {self.entry_type} {self.amount}"
