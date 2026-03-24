@@ -32,7 +32,7 @@ class TransferAPIView(APIView):
                 reference_id=data["reference_id"],
             )
 
-            # ✅ SUCCESS LOG
+            #  SUCCESS LOG
             logger.info(
                 "transfer_success",
                 extra={
@@ -55,7 +55,7 @@ class TransferAPIView(APIView):
 
         except InsufficientFundsError as e:
 
-            # ⚠️ BUSINESS FAILURE LOG
+            #  BUSINESS FAILURE LOG
             logger.warning(
                 "transfer_failed_insufficient_funds",
                 extra={
@@ -102,7 +102,7 @@ class TransferAPIView(APIView):
 
         except Exception:
 
-            # ❌ SYSTEM ERROR LOG (VERY IMPORTANT)
+            #  SYSTEM ERROR LOG (VERY IMPORTANT)
             logger.exception(
                 "transfer_unexpected_error",
                 extra={
@@ -117,3 +117,38 @@ class TransferAPIView(APIView):
                 {"error": "Internal server error"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+class AccountBalanceAPIView(APIView):
+
+    def get(self, request, account_id):
+
+        try:
+            account = LedgerAccount.objects.get(id=account_id)
+        except LedgerAccount.DoesNotExist:
+            return Response(
+                {"error": "Account not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        balance = get_account_balance(account)
+
+        return Response({
+            "account_id": account_id,
+            "balance": balance
+        }, status=status.HTTP_200_OK)
+class AccountTransactionsAPIView(APIView):
+
+    def get(self, request, account_id):
+
+        entries = (
+            TransactionEntry.objects
+            .filter(account_id=account_id)
+            .order_by("-created_at")
+        )
+
+        paginator = TransactionPagination()
+        paginated_entries = paginator.paginate_queryset(entries, request)
+
+        serializer = TransactionEntrySerializer(paginated_entries, many=True)
+
+        return paginator.get_paginated_response(serializer.data)
