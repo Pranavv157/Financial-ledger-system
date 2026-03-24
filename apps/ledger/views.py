@@ -46,13 +46,23 @@ class TransferAPIView(APIView):
 
         except InsufficientFundsError as e:
             return Response(
-                {"error": str(e)},
+                {
+                    "error": {
+                        "code": "insufficient_funds",
+                        "message": str(e),
+                    }
+                },
                 status=status.HTTP_409_CONFLICT
             )
 
         except InvalidTransferError as e:
             return Response(
-                {"error": str(e)},
+                {
+                    "error": {
+                    "code":"InvalidTransfer",
+                    "message":str(e)
+                    }
+                },
                 status=status.HTTP_400_BAD_REQUEST
             )
 
