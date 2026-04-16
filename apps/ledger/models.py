@@ -17,6 +17,10 @@ class LedgerAccount(models.Model):
         return f"{self.name} - {self.user}"
 
 
+import uuid
+from django.db import models
+
+
 class Transaction(models.Model):
 
     class Status(models.TextChoices):
@@ -26,19 +30,41 @@ class Transaction(models.Model):
         REVERSED = "REVERSED", "Reversed"
 
     reference_id = models.UUIDField(unique=True, default=uuid.uuid4)
+
     status = models.CharField(
         max_length=20,
         choices=Status.choices,
         default=Status.PENDING
     )
 
+    reverses = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="reversed_by"
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    def clean(self):
+        if self.reverses and self.reverses == self:
+            raise ValueError("Transaction cannot reverse itself")
+
+        if self.reverses and self.reverses.reverses:
+            raise ValueError("Cannot reverse a reversal")
 
     def __str__(self):
         return str(self.reference_id)
 
-
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["reverses"],
+                name="unique_reversal_per_transaction"
+            )
+        ]
 class TransactionEntry(models.Model):
 
     DEBIT = "DEBIT"

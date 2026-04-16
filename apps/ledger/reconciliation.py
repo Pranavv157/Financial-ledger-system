@@ -30,7 +30,7 @@ def reconcile_account(account_id):
             account.balance = correct_balance
             account.save(update_fields=["balance"])
 
-        # 🔥 IMPORTANT LOG
+        #  IMPORTANT LOG
         logger.error(
             "reconciliation_mismatch_fixed",
             extra={

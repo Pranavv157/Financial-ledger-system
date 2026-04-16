@@ -9,6 +9,7 @@ from apps.ledger.services import transfer_funds
 from apps.ledger.ledger_selectors import get_account_balance
 from apps.ledger.exceptions import InsufficientFundsError
 from unittest.mock import patch
+from .services import reverse_transaction
 
 User = get_user_model()
 
@@ -23,7 +24,6 @@ class TransferTests(TestCase):
         self.acc2 = LedgerAccount.objects.create(user=self.user2, name="vaishnavi")
 
     def add_balance(self, account, amount):
-        
         txn = Transaction.objects.create(reference_id=uuid.uuid4())
 
         TransactionEntry.objects.create(
@@ -33,18 +33,21 @@ class TransferTests(TestCase):
             amount=amount
         )
 
-    def test_successful_transfer(self):
-        self.add_balance(self.acc1, Decimal("100"))
+        #keep balance in sync
+        account.balance += amount
+        account.save(update_fields=["balance"])
+        def test_successful_transfer(self):
+            self.add_balance(self.acc1, Decimal("100"))
 
-        txn = transfer_funds(
-            self.acc1.id,
-            self.acc2.id,
-            Decimal("50"),
-            uuid.uuid4()
-        )
+            txn = transfer_funds(
+                self.acc1.id,
+                self.acc2.id,
+                Decimal("50"),
+                uuid.uuid4()
+            )
 
-        self.assertEqual(txn.status, "SUCCESS")
-        self.assertEqual(TransactionEntry.objects.filter(transaction=txn).count(), 2)
+            self.assertEqual(txn.status, "SUCCESS")
+            self.assertEqual(TransactionEntry.objects.filter(transaction=txn).count(), 2)
 
     def test_insufficient_funds(self):
         with self.assertRaises(Exception):
@@ -154,3 +157,22 @@ class TransferTests(TestCase):
 
         account.balance = amount
         account.save(update_fields=["balance"])
+
+    def test_transaction_reversal(self):
+        self.acc1.balance = Decimal("100")
+        self.acc1.save()
+
+        txn = transfer_funds(
+            self.acc1.id,
+            self.acc2.id,
+            Decimal("50"),
+            uuid.uuid4()
+        )
+
+        reverse_transaction(txn.id)
+
+        self.acc1.refresh_from_db()
+        self.acc2.refresh_from_db()
+
+        self.assertEqual(self.acc1.balance, Decimal("100"))
+        self.assertEqual(self.acc2.balance, Decimal("0"))
