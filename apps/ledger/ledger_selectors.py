@@ -1,31 +1,22 @@
-from django.db.models import Sum, Case, When, F, DecimalField, Value
+from django.db.models import Sum, Case, When, DecimalField, F
 from django.db.models.functions import Coalesce
+from decimal import Decimal
 from .models import TransactionEntry
 
-
 def get_account_balance(account):
-
-    result = (
+    return (
         TransactionEntry.objects
         .filter(account=account)
         .aggregate(
             balance=Coalesce(
                 Sum(
                     Case(
-                        When(
-                            entry_type=TransactionEntry.CREDIT,
-                            then=F("amount")
-                        ),
-                        When(
-                            entry_type=TransactionEntry.DEBIT,
-                            then=F("amount") * -1
-                        ),
-                        output_field=DecimalField(),
+                        When(entry_type=TransactionEntry.CREDIT, then=F("amount")),
+                        When(entry_type=TransactionEntry.DEBIT, then=-F("amount")),
+                        output_field=DecimalField()
                     )
                 ),
-                Value(0, output_field=DecimalField()),
+                Decimal("0")
             )
-        )
+        )["balance"]
     )
-
-    return result["balance"]

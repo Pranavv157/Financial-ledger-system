@@ -2,9 +2,13 @@ from django.test import TestCase
 from decimal import Decimal
 from django.contrib.auth import get_user_model
 import uuid
-
+from unittest.mock import patch
+from apps.ledger.models import Transaction
 from apps.ledger.models import LedgerAccount, TransactionEntry
 from apps.ledger.services import transfer_funds
+from apps.ledger.ledger_selectors import get_account_balance
+from apps.ledger.exceptions import InsufficientFundsError
+from unittest.mock import patch
 
 User = get_user_model()
 
@@ -19,8 +23,7 @@ class TransferTests(TestCase):
         self.acc2 = LedgerAccount.objects.create(user=self.user2, name="vaishnavi")
 
     def add_balance(self, account, amount):
-        from apps.ledger.models import Transaction, TransactionEntry
-
+        
         txn = Transaction.objects.create(reference_id=uuid.uuid4())
 
         TransactionEntry.objects.create(
@@ -34,44 +37,120 @@ class TransferTests(TestCase):
         self.add_balance(self.acc1, Decimal("100"))
 
         txn = transfer_funds(
-            sender_id=self.acc1.id,
-            receiver_id=self.acc2.id,
-            amount=Decimal("50"),
-            reference_id=uuid.uuid4()   # FIX
+            self.acc1.id,
+            self.acc2.id,
+            Decimal("50"),
+            uuid.uuid4()
         )
 
         self.assertEqual(txn.status, "SUCCESS")
-
-        entries = TransactionEntry.objects.filter(transaction=txn)
-        self.assertEqual(entries.count(), 2)
+        self.assertEqual(TransactionEntry.objects.filter(transaction=txn).count(), 2)
 
     def test_insufficient_funds(self):
-
         with self.assertRaises(Exception):
             transfer_funds(
-                sender_id=self.acc1.id,
-                receiver_id=self.acc2.id,
-                amount=Decimal("100"),
-                reference_id=uuid.uuid4()   #  FIX
+                self.acc1.id,
+                self.acc2.id,
+                Decimal("100"),
+                uuid.uuid4()
             )
 
     def test_idempotency(self):
         self.add_balance(self.acc1, Decimal("100"))
 
-        ref_id = uuid.uuid4()  #  SAME UUID for idempotency
+        ref_id = uuid.uuid4()
 
-        txn1 = transfer_funds(
-            self.acc1.id,
-            self.acc2.id,
-            Decimal("10"),
-            ref_id
-        )
-
-        txn2 = transfer_funds(
-            self.acc1.id,
-            self.acc2.id,
-            Decimal("10"),
-            ref_id
-        )
+        txn1 = transfer_funds(self.acc1.id, self.acc2.id, Decimal("10"), ref_id)
+        txn2 = transfer_funds(self.acc1.id, self.acc2.id, Decimal("10"), ref_id)
 
         self.assertEqual(txn1.id, txn2.id)
+
+    def test_balance_updates_after_transfer(self):
+        self.acc1.balance = Decimal("100")
+        self.acc1.save()
+
+        transfer_funds(
+            self.acc1.id,
+            self.acc2.id,
+            Decimal("40"),
+            uuid.uuid4()
+        )
+
+        self.acc1.refresh_from_db()
+        self.acc2.refresh_from_db()
+
+        self.assertEqual(self.acc1.balance, Decimal("60"))
+        self.assertEqual(self.acc2.balance, Decimal("40"))
+
+    def test_balance_matches_ledger(self):
+        self.acc1.balance = Decimal("100")
+        self.acc1.save()
+
+        transfer_funds(
+            self.acc1.id,
+            self.acc2.id,
+            Decimal("30"),
+            uuid.uuid4()
+        )
+
+        
+
+        self.acc1.refresh_from_db()
+        self.acc2.refresh_from_db()
+
+        self.assertEqual(self.acc1.balance, get_account_balance(self.acc1))
+        self.assertEqual(self.acc2.balance, get_account_balance(self.acc2))
+
+    def test_insufficient_balance_with_cached_field(self):
+        self.acc1.balance = Decimal("10")
+        self.acc1.save()
+
+        
+
+        with self.assertRaises(InsufficientFundsError):
+            transfer_funds(
+                self.acc1.id,
+                self.acc2.id,
+                Decimal("50"),
+                uuid.uuid4()
+            )
+
+    def test_atomicity_no_partial_update(self):
+        self.acc1.balance = Decimal("100")
+        self.acc1.save()
+
+        
+
+        with patch("apps.ledger.services.TransactionEntry.objects.create") as mock_create:
+            mock_create.side_effect = Exception("DB failure")
+
+            try:
+                transfer_funds(
+                    self.acc1.id,
+                    self.acc2.id,
+                    Decimal("50"),
+                    uuid.uuid4()
+                )
+            except:
+                pass
+
+        self.acc1.refresh_from_db()
+        self.acc2.refresh_from_db()
+
+        self.assertEqual(self.acc1.balance, Decimal("100"))
+        self.assertEqual(self.acc2.balance, Decimal("0"))
+
+    def set_balance(self, account, amount):
+        
+
+        txn = Transaction.objects.create(reference_id=uuid.uuid4())
+
+        TransactionEntry.objects.create(
+            transaction=txn,
+            account=account,
+            entry_type=TransactionEntry.CREDIT,
+            amount=amount
+        )
+
+        account.balance = amount
+        account.save(update_fields=["balance"])
