@@ -21,6 +21,8 @@ from .exceptions import InsufficientFundsError, InvalidTransferError
 
 from django.contrib.auth import get_user_model
 
+from .audit import log_action
+
 User = get_user_model()
 
 def get_platform_account():
@@ -151,14 +153,29 @@ def transfer_funds(sender_id, receiver_id, amount, reference_id):
         receiver.balance += amount
         platform_account.balance += fee
 
-        sender.save(update_fields=["balance"])
+        sender.save(update_fields=["balance"]) 
         receiver.save(update_fields=["balance"])
         platform_account.save(update_fields=["balance"])
 
         txn.status = Transaction.Status.SUCCESS
         txn.save(update_fields=["status"])
+       
+        
+    log_action(
+    action="TRANSFER",
+    user_id=sender.user_id,
+    reference_id=str(reference_id),
+    metadata={
+        "sender": sender.id,
+            "receiver": receiver.id,
+            "amount": str(amount),
+            "fee" : str(fee)
+        }
+    )
 
-        return txn
+    return txn
+
+        
 
 
 def reverse_transaction(transaction_id):
@@ -208,4 +225,14 @@ def reverse_transaction(transaction_id):
         reversal_txn.save(update_fields=["status"])
         original_txn.save(update_fields=["status"])
 
-        return reversal_txn
+        
+    log_action(
+        action="REVERSAL",
+        user_id=None,
+        reference_id=str(original_txn.reference_id),
+        metadata={
+            "original_txn": original_txn.id,
+            "reversal_txn": reversal_txn.id
+            }
+        )
+    return reversal_txn

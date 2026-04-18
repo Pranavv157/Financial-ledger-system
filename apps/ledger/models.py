@@ -3,6 +3,7 @@ from django.conf import settings
 import uuid
 
 
+
 class LedgerAccount(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     name = models.CharField(max_length=100)
@@ -17,8 +18,7 @@ class LedgerAccount(models.Model):
         return f"{self.name} - {self.user}"
 
 
-import uuid
-from django.db import models
+
 
 
 class Transaction(models.Model):
@@ -105,3 +105,20 @@ class TransactionEntry(models.Model):
     
     def __str__(self):
         return f"{self.account} {self.entry_type} {self.amount}"
+
+class Auditlog(models.Model):
+
+    ACTION_CHOICES = [
+    ("TRANSFER" , "Transfer"),
+    ("REVERSAL" , "Reversal"),
+    ("RECONCILIATION", "Reconciliation"),
+
+    ]
+    action=models.CharField(max_length=50,choices=ACTION_CHOICES)
+    user_id = models.IntegerField(null=True, blank=True)
+    reference_id = models.CharField(max_length=100, null=True, blank=True)
+    metadata = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.action} - {self.created_at}"

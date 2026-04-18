@@ -3,6 +3,7 @@ from django.db import transaction
 
 from .models import LedgerAccount
 from .ledger_selectors import get_account_balance
+from .audit import log_action
 
 
 logger = logging.getLogger(__name__)
@@ -38,6 +39,14 @@ def reconcile_account(account_id):
                 "old_balance": str(old_balance),
                 "correct_balance": str(correct_balance),
                 "difference": str(correct_balance - old_balance),
+            }
+        )
+        log_action(
+            action="RECONCILIATION",
+            reference_id=str(account_id),
+            metadata={
+                "old_balance": str(old_balance),
+                "new_balance": str(correct_balance)
             }
         )
 
