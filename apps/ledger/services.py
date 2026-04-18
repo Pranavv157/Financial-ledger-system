@@ -1,3 +1,5 @@
+import decimal
+import platform
 from django.db import transaction, IntegrityError
 from decimal import Decimal
 import uuid
@@ -8,29 +10,59 @@ from .validators import validate_transaction_balance
 from .exceptions import InsufficientFundsError, InvalidTransferError
 
 
+from django.db import transaction, IntegrityError
+from decimal import Decimal
+import uuid
+
+from .ledger_selectors import get_account_balance
+from .models import LedgerAccount, Transaction, TransactionEntry
+from .validators import validate_transaction_balance
+from .exceptions import InsufficientFundsError, InvalidTransferError
+
+from django.contrib.auth import get_user_model
+
+User = get_user_model()
+
+def get_platform_account():
+    # get or create a system user
+    platform_user, _ = User.objects.get_or_create(
+        username="platform_system"
+    )
+
+    # create account linked to user
+    account, _ = LedgerAccount.objects.get_or_create(
+        user=platform_user,
+        defaults={"balance": Decimal("0")}
+    )
+
+    return account
+
 def transfer_funds(sender_id, receiver_id, amount, reference_id):
+    
+    reference_id = str(reference_id)
 
-    amount = Decimal(amount)
+    #  robust fee detection
+    fee = Decimal("5") if Decimal(amount) >= Decimal("100") else Decimal("0")
+    amount=Decimal(amount)
+    total_amount = amount + fee
 
-    if amount <= 0:
+    if total_amount <= 0:
         raise InvalidTransferError("Amount must be positive")
 
     if sender_id == receiver_id:
         raise InvalidTransferError("Sender and receiver cannot be the same")
 
-    try:
-        reference_id = uuid.UUID(str(reference_id))
-    except ValueError:
-        raise InvalidTransferError("Invalid reference_id format")
+    # Relaxed reference_id (supports strings like "ref-fee")
+    reference_id = str(reference_id)
 
     with transaction.atomic():
 
-        #  Idempotency
+        # Idempotency
         existing = Transaction.objects.filter(reference_id=reference_id).first()
         if existing:
             return existing
 
-        #  Lock accounts (avoid race conditions)
+        # Lock accounts
         account_ids = sorted([sender_id, receiver_id])
 
         accounts = (
@@ -48,12 +80,15 @@ def transfer_funds(sender_id, receiver_id, amount, reference_id):
         sender = accounts_map[sender_id]
         receiver = accounts_map[receiver_id]
 
-        #  STEP 1: Bootstrap ledger if missing
+        #  get platform account
+        platform_account = get_platform_account()
+
+        # Bootstrap ledger if needed
         sender_entries_exist = TransactionEntry.objects.filter(account=sender).exists()
 
         if not sender_entries_exist and sender.balance > 0:
             bootstrap_txn = Transaction.objects.create(
-                reference_id=uuid.uuid4(),
+                reference_id=str(uuid.uuid4()),
                 status=Transaction.Status.SUCCESS
             )
 
@@ -64,16 +99,16 @@ def transfer_funds(sender_id, receiver_id, amount, reference_id):
                 amount=sender.balance
             )
 
-        #  STEP 2: Use ledger as source of truth
+        # Ledger balance
         effective_balance = get_account_balance(sender)
 
-        if effective_balance < amount:
+        if effective_balance < total_amount:
             raise InsufficientFundsError("Insufficient funds")
 
         if receiver.balance + amount > 1000000:
             raise InvalidTransferError("Receiver account balance limit exceeded")
 
-        #  Create transaction safely
+        # Create transaction
         try:
             txn = Transaction.objects.create(
                 reference_id=reference_id,
@@ -82,10 +117,23 @@ def transfer_funds(sender_id, receiver_id, amount, reference_id):
         except IntegrityError:
             return Transaction.objects.get(reference_id=reference_id)
 
-        # Double-entry
+        #  Correct double-entry
         entries = [
-            {"account": sender, "type": TransactionEntry.DEBIT, "amount": amount},
-            {"account": receiver, "type": TransactionEntry.CREDIT, "amount": amount},
+            {
+                "account": sender,
+                "type": TransactionEntry.DEBIT,
+                "amount": total_amount
+            },
+            {
+                "account": receiver,
+                "type": TransactionEntry.CREDIT,
+                "amount": amount
+            },
+            {
+                "account": platform_account,
+                "type": TransactionEntry.CREDIT,
+                "amount": fee
+            }
         ]
 
         validate_transaction_balance(entries)
@@ -98,12 +146,14 @@ def transfer_funds(sender_id, receiver_id, amount, reference_id):
                 amount=entry["amount"]
             )
 
-        #  Update cached balances (mirror ledger)
-        sender.balance -= amount
+        #  Correct balance updates
+        sender.balance -= total_amount
         receiver.balance += amount
+        platform_account.balance += fee
 
         sender.save(update_fields=["balance"])
         receiver.save(update_fields=["balance"])
+        platform_account.save(update_fields=["balance"])
 
         txn.status = Transaction.Status.SUCCESS
         txn.save(update_fields=["status"])
