@@ -8,7 +8,7 @@ from .services import transfer_funds
 from .serializers import TransferSerializer, TransactionEntrySerializer
 from .exceptions import InsufficientFundsError, InvalidTransferError
 from .ledger_selectors import get_account_balance
-from .models import LedgerAccount, TransactionEntry
+from .models import LedgerAccount, TransactionEntry ,Transaction , AuditLog
 from .pagination import TransactionPagination
 
 
@@ -32,90 +32,29 @@ class TransferAPIView(APIView):
                 reference_id=data["reference_id"],
             )
 
-            #  SUCCESS LOG
-            logger.info(
-                "transfer_success",
-                extra={
-                    "sender_id": data["sender_id"],
-                    "receiver_id": data["receiver_id"],
-                    "amount": str(data["amount"]),
-                    "reference_id": str(data["reference_id"]),
-                    "transaction_id": txn.id,
-                }
-            )
-
-            return Response(
-                {
-                    "transaction_id": txn.id,
-                    "reference_id": str(txn.reference_id),
-                    "status": txn.status,
-                },
-                status=status.HTTP_200_OK
-            )
+            return Response({
+                "transaction_id": txn.id,
+                "reference_id": str(txn.reference_id),
+                "status": txn.status,
+            })
 
         except InsufficientFundsError as e:
-
-            #  BUSINESS FAILURE LOG
-            logger.warning(
-                "transfer_failed_insufficient_funds",
-                extra={
-                    "sender_id": data["sender_id"],
-                    "receiver_id": data["receiver_id"],
-                    "amount": str(data["amount"]),
-                    "reference_id": str(data["reference_id"]),
-                    "error": str(e),
-                }
-            )
-
             return Response(
-                {
-                    "error": {
-                        "code": "insufficient_funds",
-                        "message": str(e),
-                    }
-                },
-                status=status.HTTP_409_CONFLICT
+                {"error": {"code": "insufficient_funds", "message": str(e)}},
+                status=409
             )
 
         except InvalidTransferError as e:
-
-            logger.warning(
-                "transfer_failed_invalid",
-                extra={
-                    "sender_id": data["sender_id"],
-                    "receiver_id": data["receiver_id"],
-                    "amount": str(data["amount"]),
-                    "reference_id": str(data["reference_id"]),
-                    "error": str(e),
-                }
-            )
-
             return Response(
-                {
-                    "error": {
-                        "code": "invalid_transfer",
-                        "message": str(e)
-                    }
-                },
-                status=status.HTTP_400_BAD_REQUEST
+                {"error": {"code": "invalid_transfer", "message": str(e)}},
+                status=400
             )
 
         except Exception:
-
-            #  SYSTEM ERROR LOG (VERY IMPORTANT)
-            logger.exception(
-                "transfer_unexpected_error",
-                extra={
-                    "sender_id": data.get("sender_id"),
-                    "receiver_id": data.get("receiver_id"),
-                    "amount": str(data.get("amount")),
-                    "reference_id": str(data.get("reference_id")),
-                }
-            )
-
+            logger.exception("transfer_error")
             return Response(
                 {"error": "Internal server error"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                status=500
             )
 
 class AccountBalanceAPIView(APIView):
@@ -152,3 +91,21 @@ class AccountTransactionsAPIView(APIView):
         serializer = TransactionEntrySerializer(paginated_entries, many=True)
 
         return paginator.get_paginated_response(serializer.data)
+class TransferStatusAPIView(APIView):
+
+    def get(self, request, reference_id):
+
+        try:
+            txn = Transaction.objects.get(reference_id=reference_id)
+        except Transaction.DoesNotExist:
+            return Response(
+                {"error": "Transaction not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        return Response({
+            "reference_id": str(txn.reference_id),
+            "status": txn.status,
+            "created_at": txn.created_at.isoformat(),
+            "updated_at": txn.updated_at.isoformat(),
+        })

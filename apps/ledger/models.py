@@ -9,9 +9,9 @@ class LedgerAccount(models.Model):
     name = models.CharField(max_length=100)
 
     balance = models.DecimalField(
-    max_digits=12,
-    decimal_places=2,
-    default=0
+        max_digits=12,
+        decimal_places=2,
+        default=0
     )
 
     def __str__(self):
@@ -20,11 +20,10 @@ class LedgerAccount(models.Model):
 
 
 
-
 class Transaction(models.Model):
 
     class Status(models.TextChoices):
-        PENDING = "PENDING", "Pending"
+        PROCESSING = "PROCESSING", "Processing"
         SUCCESS = "SUCCESS", "Success"
         FAILED = "FAILED", "Failed"
         REVERSED = "REVERSED", "Reversed"
@@ -34,8 +33,10 @@ class Transaction(models.Model):
     status = models.CharField(
         max_length=20,
         choices=Status.choices,
-        default=Status.PENDING
+        default=Status.PROCESSING
     )
+
+    failed_reason = models.TextField(null=True, blank=True)  #  NEW
 
     reverses = models.ForeignKey(
         "self",
@@ -59,12 +60,18 @@ class Transaction(models.Model):
         return str(self.reference_id)
 
     class Meta:
+        indexes = [
+            models.Index(fields=["reference_id"]),
+            models.Index(fields=["status"]),
+        ]
         constraints = [
             models.UniqueConstraint(
                 fields=["reverses"],
                 name="unique_reversal_per_transaction"
             )
         ]
+
+
 class TransactionEntry(models.Model):
 
     DEBIT = "DEBIT"
@@ -98,26 +105,30 @@ class TransactionEntry(models.Model):
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
+
     class Meta:
         indexes = [
             models.Index(fields=["account", "created_at"]),
+            models.Index(fields=["transaction"]),
         ]
-    
+
     def __str__(self):
         return f"{self.account} {self.entry_type} {self.amount}"
 
-class Auditlog(models.Model):
+
+class AuditLog(models.Model):
 
     ACTION_CHOICES = [
-    ("TRANSFER" , "Transfer"),
-    ("REVERSAL" , "Reversal"),
-    ("RECONCILIATION", "Reconciliation"),
-
+        ("TRANSFER", "Transfer"),
+        ("REVERSAL", "Reversal"),
+        ("RECONCILIATION", "Reconciliation"),
     ]
-    action=models.CharField(max_length=50,choices=ACTION_CHOICES)
+
+    action = models.CharField(max_length=50, choices=ACTION_CHOICES)
     user_id = models.IntegerField(null=True, blank=True)
     reference_id = models.CharField(max_length=100, null=True, blank=True)
     metadata = models.JSONField(default=dict)
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
