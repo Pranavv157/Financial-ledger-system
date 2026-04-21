@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import TransferAPIView, AccountBalanceAPIView, AccountTransactionsAPIView
+from .views import TransferAPIView, AccountBalanceAPIView, AccountTransactionsAPIView ,TransferStatusAPIView
 
 urlpatterns = [
     path("transfers/", TransferAPIView.as_view(), name="transfer"),
@@ -15,4 +15,5 @@ urlpatterns = [
         AccountTransactionsAPIView.as_view(),
         name="account-transactions"
     ),
+    path("transfers/<uuid:reference_id>/", TransferStatusAPIView.as_view())
 ]
