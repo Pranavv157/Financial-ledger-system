@@ -4,6 +4,7 @@ from django.db import transaction
 from .models import LedgerAccount
 from .ledger_selectors import get_account_balance
 from .audit import log_action
+from decimal import Decimal
 
 
 logger = logging.getLogger(__name__)
@@ -12,7 +13,7 @@ logger = logging.getLogger(__name__)
 def reconcile_account(account_id):
 
     try:
-        account = LedgerAccount.objects.get(id=account_id)
+        account = LedgerAccount.objects.select_for_update().get(id=account_id)
     except LedgerAccount.DoesNotExist:
         logger.warning(
             "reconciliation_account_not_found",
@@ -24,7 +25,7 @@ def reconcile_account(account_id):
     correct_balance = get_account_balance(account)
 
     # compare
-    if account.balance != correct_balance:
+    if abs(account.balance - correct_balance) > Decimal("0.01"):
         old_balance = account.balance
 
         with transaction.atomic():
@@ -65,7 +66,7 @@ def reconcile_all_accounts():
 
     logger.info("reconciliation_started")
 
-    accounts = LedgerAccount.objects.all()
+    accounts = LedgerAccount.objects.iterator(chunk_size=1000)
 
     for account in accounts:
         reconcile_account(account.id)

@@ -1,13 +1,16 @@
 import requests
 import uuid
 import threading
+from decimal import Decimal
 import time
 
-URL = "http://127.0.0.1:8000/ledger/transfer/"
+URL = "http://127.0.0.1:8000/ledger/transfers/"
+BALANCE_URL = "http://127.0.0.1:8000/ledger/accounts/1/balance/"
 
 success_count = 0
 error_count = 0
 lock = threading.Lock()
+
 
 def send_transfer():
     global success_count, error_count
@@ -15,7 +18,7 @@ def send_transfer():
     payload = {
         "sender_id": 1,
         "receiver_id": 2,
-        "amount": 1,
+        "amount": "1",
         "reference_id": str(uuid.uuid4())
     }
 
@@ -23,42 +26,39 @@ def send_transfer():
         response = requests.post(URL, json=payload, timeout=10)
 
         with lock:
-            if response.status_code == 200:
+            if response.status_code in (200, 202):
                 success_count += 1
             else:
                 error_count += 1
-            if response.status_code == 200:
-                print(f"{response.status_code}: {response.json()}")
-            else:
-                # Extract error message from HTML response
-                error_text = response.text
-                if "IntegrityError" in error_text:
-                    print(f"{response.status_code}: IntegrityError - duplicate transaction")
-                elif "OperationalError" in error_text or "database" in error_text.lower():
-                    print(f"{response.status_code}: Database error - concurrency limit")
-                else:
-                    print(f"{response.status_code}: {error_text[:300]}")
 
-    except requests.exceptions.RequestException as e:
+            print(f"{response.status_code}: {response.text}")
+
+    except Exception as e:
         with lock:
             error_count += 1
-        print(f"Request failed: {e}")
+        print(f"Error: {e}")
 
 
 threads = []
 
-print("Starting stress test with 20 concurrent requests...\n")
+print("Starting stress test...\n")
 
-for i in range(20):
+for _ in range(50):
     t = threading.Thread(target=send_transfer)
     threads.append(t)
     t.start()
-     
+    time.sleep(2)
 
 for t in threads:
     t.join()
 
-print(f"\n--- Results ---")
+print("\n--- Results ---")
 print(f"Success: {success_count}")
 print(f"Errors: {error_count}")
-print("Finished")
+
+
+#  Check final balance
+print("\nChecking final balance...")
+
+resp = requests.get(BALANCE_URL)
+print("Final balance:", resp.json())

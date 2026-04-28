@@ -11,6 +11,7 @@ from apps.ledger.exceptions import InsufficientFundsError
 from unittest.mock import patch
 from .services import reverse_transaction
 from .services import get_platform_account
+from apps.ledger.reconciliation import reconcile_account
 
 User = get_user_model()
 
@@ -38,21 +39,21 @@ class TransferTests(TestCase):
         #keep balance in sync
         account.balance += amount
         account.save(update_fields=["balance"])
-        def test_successful_transfer(self):
-            self.add_balance(self.acc1, Decimal("100"))
+    def test_successful_transfer(self):
+        self.add_balance(self.acc1, Decimal("100"))
 
-            txn = transfer_funds(
-                self.acc1.id,
-                self.acc2.id,
-                Decimal("50"),
-                uuid.uuid4()
+        txn = transfer_funds(
+            self.acc1.id,
+            self.acc2.id,
+            Decimal("50"),
+            uuid.uuid4()
             )
 
-            self.assertEqual(txn.status, "SUCCESS")
-            self.assertEqual(TransactionEntry.objects.filter(transaction=txn).count(), 2)
+        self.assertEqual(txn.status, "SUCCESS")
+        self.assertEqual(TransactionEntry.objects.filter(transaction=txn).count(), 2)
 
     def test_insufficient_funds(self):
-        with self.assertRaises(Exception):
+        with self.assertRaises(InsufficientFundsError):
             transfer_funds(
                 self.acc1.id,
                 self.acc2.id,
@@ -197,3 +198,20 @@ class TransferTests(TestCase):
         self.assertEqual(self.acc1.balance, Decimal("95"))   # 200 - 105
         self.assertEqual(self.acc2.balance, Decimal("100"))
         self.assertEqual(self.platform_account.balance, Decimal("5"))
+    
+    def test_reconciliation_fixes_balance(self):
+        self.set_balance(self.acc1, Decimal("100"))
+
+        # corrupt balance
+        self.acc1.balance = Decimal("50")
+        self.acc1.save()
+
+        
+        reconcile_account(self.acc1.id)
+
+        self.acc1.refresh_from_db()
+
+        self.assertEqual(
+            self.acc1.balance,
+            get_account_balance(self.acc1)
+        )

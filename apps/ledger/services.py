@@ -33,16 +33,6 @@ def get_platform_account():
 
     return account
 
-from django.db import transaction, IntegrityError
-from decimal import Decimal
-import uuid
-
-from .models import LedgerAccount, Transaction, TransactionEntry
-from .exceptions import InsufficientFundsError, InvalidTransferError
-from .ledger_selectors import get_account_balance
-from .validators import validate_transaction_balance
-from .audit import log_action
-
 
 def transfer_funds(sender_id, receiver_id, amount, reference_id):
 
@@ -58,93 +48,95 @@ def transfer_funds(sender_id, receiver_id, amount, reference_id):
     if sender_id == receiver_id:
         raise InvalidTransferError("Sender and receiver cannot be same")
 
-    with transaction.atomic():
+    #  STEP 1: PRE-CHECK IDEMPOTENCY (FAST PATH)
+    existing = Transaction.objects.filter(reference_id=reference_id).first()
+    if existing:
+        return existing
 
-        #  STRONG IDEMPOTENCY (DB LEVEL)
-        try:
+    try:
+        with transaction.atomic():
+
             txn = Transaction.objects.create(
                 reference_id=reference_id,
                 status=Transaction.Status.PROCESSING
             )
-        except IntegrityError:
-            return Transaction.objects.get(reference_id=reference_id)
 
-        #  LOCK ACCOUNTS (prevents race conditions)
-        account_ids = sorted([sender_id, receiver_id])
-
-        accounts = (
-            LedgerAccount.objects
-            .select_for_update()
-            .filter(id__in=account_ids)
-        )
-
-        if len(accounts) != 2:
-            raise InvalidTransferError("Invalid accounts")
-
-        acc_map = {a.id: a for a in accounts}
-        sender = acc_map[sender_id]
-        receiver = acc_map[receiver_id]
-
-        #  BALANCE CHECK (ledger-based)
-        effective_balance = get_account_balance(sender)
-
-        if effective_balance < total_amount:
-            raise InsufficientFundsError("Insufficient funds")
-
-        #  DOUBLE ENTRY (mathematically correct)
-        entries = [
-            {"account": sender, "type": TransactionEntry.DEBIT, "amount": total_amount},
-            {"account": receiver, "type": TransactionEntry.CREDIT, "amount": amount},
-        ]
-
-        if fee > 0:
-            platform_account = get_platform_account()
-            entries.append({
-                "account": platform_account,
-                "type": TransactionEntry.CREDIT,
-                "amount": fee
-            })
-
-        #  PROOF: debits == credits
-        validate_transaction_balance(entries)
-
-        #  WRITE ENTRIES
-        for e in entries:
-            TransactionEntry.objects.create(
-                transaction=txn,
-                account=e["account"],
-                entry_type=e["type"],
-                amount=e["amount"]
+            #  LOCK ACCOUNTS
+            account_ids = sorted([sender_id, receiver_id])
+            accounts = (
+                LedgerAccount.objects
+                .select_for_update()
+                .filter(id__in=account_ids)
             )
 
-        #  OPTIONAL: maintain cached balance (safe now)
-        sender.balance -= total_amount
-        receiver.balance += amount
-        sender.save(update_fields=["balance"])
-        receiver.save(update_fields=["balance"])
+            if len(accounts) != 2:
+                raise InvalidTransferError("Invalid accounts")
 
-        if fee > 0:
-            platform_account.balance += fee
-            platform_account.save(update_fields=["balance"])
+            acc_map = {a.id: a for a in accounts}
+            sender = acc_map[sender_id]
+            receiver = acc_map[receiver_id]
 
-        txn.status = Transaction.Status.SUCCESS
-        txn.save(update_fields=["status"])
+            #  BALANCE CHECK
+            effective_balance = get_account_balance(sender)
 
-    #  AUDIT LOG
-    log_action(
-        action="TRANSFER",
-        user_id=sender.user_id,
-        reference_id=str(reference_id),
-        metadata={
-            "sender": sender.id,
-            "receiver": receiver.id,
-            "amount": str(amount),
-            "fee": str(fee)
-        }
-    )
+            if effective_balance < total_amount:
+                raise InsufficientFundsError("Insufficient funds")
 
-    return txn
-        
+            #  ENTRIES
+            entries = [
+                {"account": sender, "type": TransactionEntry.DEBIT, "amount": total_amount},
+                {"account": receiver, "type": TransactionEntry.CREDIT, "amount": amount},
+            ]
+
+            if fee > 0:
+                platform_account = get_platform_account()
+                entries.append({
+                    "account": platform_account,
+                    "type": TransactionEntry.CREDIT,
+                    "amount": fee
+                })
+
+            validate_transaction_balance(entries)
+
+            for e in entries:
+                TransactionEntry.objects.create(
+                    transaction=txn,
+                    account=e["account"],
+                    entry_type=e["type"],
+                    amount=e["amount"]
+                )
+
+            #  UPDATE BALANCES
+            sender.balance -= total_amount
+            receiver.balance += amount
+            sender.save(update_fields=["balance"])
+            receiver.save(update_fields=["balance"])
+
+            if fee > 0:
+                platform_account.balance += fee
+                platform_account.save(update_fields=["balance"])
+
+            txn.status = Transaction.Status.SUCCESS
+            txn.save(update_fields=["status"])
+
+        #  OUTSIDE TRANSACTION → SAFE
+        log_action(
+            action="TRANSFER",
+            user_id=sender.user_id,
+            reference_id=reference_id,
+            metadata={
+                "sender": sender.id,
+                "receiver": receiver.id,
+                "amount": str(amount),
+                "fee": str(fee)
+            }
+        )
+
+        return txn
+
+    except IntegrityError:
+        # SAFE (OUTSIDE atomic)
+        return Transaction.objects.get(reference_id=reference_id)        
 
 
 def reverse_transaction(transaction_id):

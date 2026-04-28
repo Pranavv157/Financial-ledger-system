@@ -10,6 +10,7 @@ from .exceptions import InsufficientFundsError, InvalidTransferError
 from .ledger_selectors import get_account_balance
 from .models import LedgerAccount, TransactionEntry ,Transaction , AuditLog
 from .pagination import TransactionPagination
+from .tasks import process_transfer
 
 
 logger = logging.getLogger(__name__)
@@ -25,56 +26,42 @@ class TransferAPIView(APIView):
         data = serializer.validated_data
 
         try:
-            txn = transfer_funds(
+            process_transfer.delay(
                 sender_id=data["sender_id"],
                 receiver_id=data["receiver_id"],
-                amount=data["amount"],
-                reference_id=data["reference_id"],
+                amount=str(data["amount"]),
+                reference_id=str(data["reference_id"]),
             )
 
-            return Response({
-                "transaction_id": txn.id,
-                "reference_id": str(txn.reference_id),
-                "status": txn.status,
-            })
-
-        except InsufficientFundsError as e:
-            return Response(
-                {"error": {"code": "insufficient_funds", "message": str(e)}},
-                status=409
+            logger.info(
+                "transfer_queued",
+                extra={
+                    "sender_id": data["sender_id"],
+                    "receiver_id": data["receiver_id"],
+                    "amount": str(data["amount"]),
+                    "reference_id": str(data["reference_id"]),
+                }
             )
 
-        except InvalidTransferError as e:
             return Response(
-                {"error": {"code": "invalid_transfer", "message": str(e)}},
-                status=400
+                {
+                    "status": "processing",
+                    "reference_id": str(data["reference_id"])
+                },
+                status=status.HTTP_202_ACCEPTED
             )
 
         except Exception:
-            logger.exception("transfer_error")
+
+            logger.exception("transfer_queue_failed")
+
             return Response(
-                {"error": "Internal server error"},
-                status=500
+                {"error": "Failed to queue transfer"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-class AccountBalanceAPIView(APIView):
 
-    def get(self, request, account_id):
 
-        try:
-            account = LedgerAccount.objects.get(id=account_id)
-        except LedgerAccount.DoesNotExist:
-            return Response(
-                {"error": "Account not found"},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-        balance = get_account_balance(account)
-
-        return Response({
-            "account_id": account_id,
-            "balance": balance
-        }, status=status.HTTP_200_OK)
 class AccountTransactionsAPIView(APIView):
 
     def get(self, request, account_id):
@@ -91,6 +78,8 @@ class AccountTransactionsAPIView(APIView):
         serializer = TransactionEntrySerializer(paginated_entries, many=True)
 
         return paginator.get_paginated_response(serializer.data)
+
+
 class TransferStatusAPIView(APIView):
 
     def get(self, request, reference_id):
@@ -109,3 +98,31 @@ class TransferStatusAPIView(APIView):
             "created_at": txn.created_at.isoformat(),
             "updated_at": txn.updated_at.isoformat(),
         })
+
+
+class AccountBalanceAPIView(APIView):
+
+    def get(self, request, account_id):
+
+        try:
+            account = LedgerAccount.objects.get(id=account_id)
+        except LedgerAccount.DoesNotExist:
+            return Response(
+                {"error": "Account not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+       
+        return Response(
+            {
+                "account_id": account.id,
+                "balance": account.balance
+            },
+            status=status.HTTP_200_OK
+        )
+        logger.info(
+                "balance_fetched",
+                extra={
+                    "account_id": account.id,
+                    "balance": str(account.balance)
+                }
+            )
