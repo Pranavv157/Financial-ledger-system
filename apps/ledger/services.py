@@ -50,8 +50,16 @@ def transfer_funds(sender_id, receiver_id, amount, reference_id):
 
     #  STEP 1: PRE-CHECK IDEMPOTENCY (FAST PATH)
     existing = Transaction.objects.filter(reference_id=reference_id).first()
+    existing = Transaction.objects.filter(reference_id=reference_id).first()
+
     if existing:
-        return existing
+        #  KEY LOGIC
+        if existing.status == Transaction.Status.SUCCESS:
+            return existing
+
+        if existing.status == Transaction.Status.PROCESSING:
+            # another worker is already working
+            return existing
 
     try:
         with transaction.atomic():
@@ -134,10 +142,14 @@ def transfer_funds(sender_id, receiver_id, amount, reference_id):
 
         return txn
 
-    except IntegrityError:
-        # SAFE (OUTSIDE atomic)
-        return Transaction.objects.get(reference_id=reference_id)        
+    except Exception:
 
+        # VERY IMPORTANT
+        Transaction.objects.filter(reference_id=reference_id).update(
+            status=Transaction.Status.FAILED
+        )
+
+        raise
 
 def reverse_transaction(transaction_id):
 
