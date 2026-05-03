@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(powershell Get-ChildItem 'C:\\\\Program Files' -Recurse -Directory -Filter 'PostgreSQL' -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName:*)",
-      "Bash(powershell Get-ItemProperty HKLM:\\\\SYSTEM\\\\CurrentControlSet\\\\Services\\\\postgresql-x64-12 | Select-Object -ExpandProperty ImagePath:*)"
-    ]
-  }
-}
