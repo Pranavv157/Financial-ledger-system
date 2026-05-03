@@ -6,5 +6,5 @@ __pycache__/
 venv/
 .env.*
 db.sqlite3
-.claude/
+.claude
 Postman/

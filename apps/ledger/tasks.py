@@ -1,4 +1,5 @@
 
+
 from celery import shared_task
 from .services import transfer_funds
 from .redis_client import redis_client
@@ -21,8 +22,7 @@ def process_transfer(self, sender_id, receiver_id, amount, reference_id):
 
     finally:
         #  release lock
-        redis_client.delete(lock_key) transfer_funds(sender_id, receiver_id, amount, reference_id)
-
+        redis_client.delete(lock_key)
     return {
         "transaction_id": txn.id,
         "reference_id": txn.reference_id,
