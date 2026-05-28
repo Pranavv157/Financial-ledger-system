@@ -283,11 +283,6 @@ celery -A ledger_system worker --loglevel=info
 
 ## 💼 Why This Matters
 
-This project models systems similar to:
-
-* Stripe
-* PayPal
-
 It demonstrates the ability to design:
 
 ```
