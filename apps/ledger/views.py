@@ -5,16 +5,23 @@ from rest_framework.response import Response
 from rest_framework import status
 
 from .services import transfer_funds
-from .serializers import TransferSerializer, TransactionEntrySerializer
-from .exceptions import InsufficientFundsError, InvalidTransferError
-from .ledger_selectors import get_account_balance
-from .models import LedgerAccount, TransactionEntry ,Transaction , AuditLog
-from .pagination import TransactionPagination
-from .tasks import process_transfer
+from .serializers import (
+TransferSerializer,
+TransactionEntrySerializer,
+)
+from .exceptions import (
+InsufficientFundsError,
+InvalidTransferError,
+)
+from .models import (
+LedgerAccount,
+TransactionEntry,
+Transaction,
+)
 
+from .pagination import TransactionPagination
 
 logger = logging.getLogger(__name__)
-
 
 class TransferAPIView(APIView):
 
@@ -26,7 +33,8 @@ class TransferAPIView(APIView):
         data = serializer.validated_data
 
         try:
-            process_transfer.delay(
+
+            txn = transfer_funds(
                 sender_id=data["sender_id"],
                 receiver_id=data["receiver_id"],
                 amount=str(data["amount"]),
@@ -34,51 +42,45 @@ class TransferAPIView(APIView):
             )
 
             logger.info(
-                "transfer_queued",
+                "transfer_completed",
                 extra={
+                    "transaction_id": txn.id,
+                    "reference_id": str(txn.reference_id),
                     "sender_id": data["sender_id"],
                     "receiver_id": data["receiver_id"],
                     "amount": str(data["amount"]),
-                    "reference_id": str(data["reference_id"]),
                 }
             )
 
             return Response(
                 {
-                    "status": "processing",
-                    "reference_id": str(data["reference_id"])
+                    "transaction_id": txn.id,
+                    "reference_id": str(txn.reference_id),
+                    "status": txn.status,
                 },
-                status=status.HTTP_202_ACCEPTED
+                status=status.HTTP_200_OK
+            )
+
+        except (
+            InsufficientFundsError,
+            InvalidTransferError
+        ) as e:
+
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_400_BAD_REQUEST
             )
 
         except Exception:
 
-            logger.exception("transfer_queue_failed")
-
-            return Response(
-                {"error": "Failed to queue transfer"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            logger.exception(
+                "transfer_failed"
             )
 
-
-
-class AccountTransactionsAPIView(APIView):
-
-    def get(self, request, account_id):
-
-        entries = (
-            TransactionEntry.objects
-            .filter(account_id=account_id)
-            .order_by("-created_at")
-        )
-
-        paginator = TransactionPagination()
-        paginated_entries = paginator.paginate_queryset(entries, request)
-
-        serializer = TransactionEntrySerializer(paginated_entries, many=True)
-
-        return paginator.get_paginated_response(serializer.data)
-
+            return Response(
+                {"error": "Transfer failed"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 class TransferStatusAPIView(APIView):
 
@@ -98,7 +100,6 @@ class TransferStatusAPIView(APIView):
             "created_at": txn.created_at.isoformat(),
             "updated_at": txn.updated_at.isoformat(),
         })
-
 
 class AccountBalanceAPIView(APIView):
 

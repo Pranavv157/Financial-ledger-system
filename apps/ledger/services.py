@@ -49,13 +49,17 @@ def transfer_funds(sender_id, receiver_id, amount, reference_id):
         raise InvalidTransferError("Sender and receiver cannot be same")
 
     #  STEP 1: PRE-CHECK IDEMPOTENCY (FAST PATH)
-    existing = Transaction.objects.filter(reference_id=reference_id).first()
-    existing = Transaction.objects.filter(reference_id=reference_id).first()
+    try:
+        txn=Transaction.Objects.create(
+        reference_id=reference_id,
+        status=Transaction.Status.PROCESSING
+        )
+    except IntegrityError:
+        return Transaction.objects.get(
+        reference_id=reference_id
+        )
 
     if existing:
-        #  KEY LOGIC
-        if existing.status == Transaction.Status.SUCCESS:
-            return existing
 
         if existing.status == Transaction.Status.PROCESSING:
             # another worker is already working

@@ -43,11 +43,15 @@ threads = []
 
 print("Starting stress test...\n")
 
-for _ in range(50):
+for _ in range(1000):
     t = threading.Thread(target=send_transfer)
     threads.append(t)
     t.start()
-    time.sleep(2)
+    start = time.time()
+    end = time.time()
+
+print(f"Total Time: {end-start:.2f}s")
+    
 
 for t in threads:
     t.join()
