@@ -440,13 +440,14 @@ while applying backend engineering principles commonly used in payment and finte
 
 ---
 
-## Performance Results
+## Performance & Concurrency Testing
 
-- Load tested with 500 concurrent users using Locust
-- Processed 3,400+ transfer requests
-- Maintained ledger consistency under concurrent load
-- Zero failed financial transactions
-- Zero balance mismatches after reconciliation
+- Load tested using Locust under concurrent traffic
+- Processed 3,000+ transfer requests
+- Verified row-level locking behavior during concurrent balance updates
+- Maintained ledger consistency after load testing
+- Verified cached balances matched ledger-derived balances after reconciliation
+- Validated idempotency and transaction correctness under concurrent requests
 
   
 # 👨‍💻 Author
