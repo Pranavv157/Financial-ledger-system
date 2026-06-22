@@ -449,6 +449,17 @@ while applying backend engineering principles commonly used in payment and finte
 - Verified cached balances matched ledger-derived balances after reconciliation
 - Validated idempotency and transaction correctness under concurrent requests
 
+## Concurrency Validation
+
+The system was stress tested using Locust to simulate concurrent transfer requests.
+
+Validation performed after testing:
+
+- No balance corruption detected
+- No double spending observed
+- No stuck transactions in PROCESSING state
+- Ledger balances matched cached balances after reconciliation
+- ACID transaction guarantees preserved under concurrent access
   
 # 👨‍💻 Author
 
