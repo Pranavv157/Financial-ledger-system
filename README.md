@@ -1,303 +1,454 @@
-# 💳 Ledger System — Scalable Financial Backend
+# 💳 Financial Ledger System
 
-A production-style financial ledger system built with Django that simulates real-world payment infrastructure.
-It focuses on **correctness, consistency, scalability, and auditability** — the same principles used in modern fintech systems.
+A production-inspired financial ledger backend built with Django and PostgreSQL that demonstrates how modern payment systems maintain correctness, consistency, auditability, and concurrency safety.
 
----
-
-## 🚀 Overview
-
-This project implements a **double-entry accounting system** with:
-
-* Safe money transfers
-* Cached balances for performance
-* Reconciliation for consistency
-* Transaction reversals (refunds)
-* Fee handling (platform revenue)
-* Audit logging for traceability
-* Async processing for scalability
+This project implements core fintech patterns such as double-entry accounting, transactional integrity, idempotent transfers, reconciliation, audit logging, and transaction reversals.
 
 ---
 
-## 🧠 Core Principles
+## 🚀 Why This Project?
 
-### 1. Double Entry Accounting
+Financial systems cannot afford:
 
-Every transaction creates:
+- Double spending
+- Lost updates
+- Partial transactions
+- Balance inconsistencies
+- Missing audit trails
 
-* **Debit entry**
-* **Credit entry**
-
-```
-Total Debit = Total Credit
-```
-
-This ensures financial correctness.
+This project focuses on solving those problems using real-world backend engineering practices.
 
 ---
 
-### 2. Ledger as Source of Truth
+# 🏗 Architecture
 
-* `TransactionEntry` → immutable, append-only ledger ✅
-* `LedgerAccount.balance` → cached value ⚡
-
-If mismatch occurs:
-
-```
-Ledger (truth) > Cached balance (derived)
+```text
+Client
+   │
+   ▼
+REST API Layer
+   │
+   ▼
+Service Layer
+   │
+   ├── Validation
+   ├── Business Rules
+   ├── Idempotency
+   ├── Balance Checks
+   └── Transfer Processing
+   │
+   ▼
+PostgreSQL
 ```
 
----
+The codebase follows a layered architecture:
 
-### 3. ACID Transactions
-
-All transfers use:
-
-* `transaction.atomic()`
-* `select_for_update()` (row-level locking)
-
-Ensures:
-
-* No race conditions
-* No lost updates
-* No partial transfers
-
----
-
-## 🏗 System Architecture
-
-```
-API Layer (Views)
-        ↓
-Service Layer (Business Logic)
-        ↓
-Selectors (Query Layer)
-        ↓
-Models (Database)
+```text
+Views
+  ↓
+Services
+  ↓
+Selectors
+  ↓
+Models
 ```
 
----
-
-## 📦 Features Implemented
-
-### ✅ Phase 1 — Production-Ready Basics
-
-* Transfer API
-* Account balance API
-* Transaction history API
-* Pagination
-* Structured error handling
-* Logging
-* Unit testing
+This keeps business logic isolated from API and database concerns.
 
 ---
 
-### ⚡ Phase 2 — Performance & Consistency
+# ⚙️ Core Features
 
-* Cached balance (`O(1)` reads)
-* Row-level locking
-* Reconciliation system
-* Consistency validation
+## 💸 Money Transfers
 
----
+Supports secure account-to-account transfers with:
 
-### 💰 Phase 3 — Financial Features
-
-#### 🔁 Transaction Reversal
-
-* No deletion (immutable ledger)
-* Creates compensating transaction
-
-#### 💸 Fee System
-
-* Platform account collects fees
-* Multi-entry transaction:
-
-  ```
-  Sender → DEBIT (amount + fee)
-  Receiver → CREDIT (amount)
-  Platform → CREDIT (fee)
-  ```
-
-#### 🧾 Audit Logging
-
-Tracks:
-
-* Transfers
-* Reversals
-* Reconciliation fixes
-
-Stored as structured JSON metadata.
+- Input validation
+- Balance validation
+- Atomic processing
+- Idempotency protection
+- Audit logging
 
 ---
 
-### 🚀 Phase 4 — Scaling (In Progress)
+## 📒 Double Entry Accounting
 
-* Async processing with Celery + Redis
-* Background task execution
-* Retry mechanism
+Every transfer generates balanced ledger entries.
 
----
-
-## 🔄 Transfer Flow
-
-```
-1. Validate input
-2. Idempotency check
-3. Lock accounts
-4. Check balance
-5. Create transaction (PENDING)
-6. Create ledger entries
-7. Update cached balances
-8. Mark SUCCESS
-9. Log audit event
+```text
+Debit  = Credit
 ```
 
----
+Example:
 
-## ⚠️ Key Problems Solved
-
-| Problem              | Solution            |
-| -------------------- | ------------------- |
-| Race conditions      | Row-level locking   |
-| Lost updates         | Atomic transactions |
-| Double spending      | Idempotency keys    |
-| Slow balance queries | Cached balance      |
-| Data inconsistency   | Reconciliation job  |
-| Fraud/debugging gaps | Audit logs          |
-
----
-
-## 🧪 Testing
-
-Includes unit tests for:
-
-* Successful transfers
-* Insufficient funds
-* Idempotency
-* Cached balance correctness
-* Atomic rollback safety
-
----
-
-## 📊 Logging Strategy
-
-| Level     | Purpose                |
-| --------- | ---------------------- |
-| INFO      | Successful operations  |
-| WARNING   | Business rule failures |
-| ERROR     | Data inconsistencies   |
-| EXCEPTION | System failures        |
-
----
-
-## ⚡ Async Processing (Celery)
-
+```text
+Account A  → Debit 100
+Account B  → Credit 100
 ```
-API → Queue → Worker → DB
+
+This guarantees financial correctness.
+
+---
+
+## 🔒 ACID Transactions
+
+All transfers execute inside:
+
+```python
+transaction.atomic()
 ```
+
+Guarantees:
+
+- All-or-nothing execution
+- No partial updates
+- Automatic rollback on failure
+
+---
+
+## ⚡ Concurrency Protection
+
+To prevent race conditions and double spending:
+
+```python
+select_for_update()
+```
+
+is used to lock accounts during transfers.
 
 Benefits:
 
-* Fast API response
-* Retry on failure
-* Better scalability
+- Prevents lost updates
+- Prevents balance corruption
+- Handles concurrent requests safely
 
 ---
 
-## 🛠 Tech Stack
+## 🛡 Idempotency Protection
 
-* Python (Django)
-* Django REST Framework
-* PostgreSQL (recommended)
-* Redis (queue)
-* Celery (async tasks)
+Every transfer uses a unique:
+
+```text
+reference_id
+```
+
+Duplicate requests return the existing transaction instead of creating a new one.
+
+This prevents accidental double charges caused by:
+
+- Network retries
+- Client retries
+- Duplicate submissions
 
 ---
 
-## 🚀 How to Run
+## 📊 Cached Balance Strategy
 
-### 1. Clone repo
+The system maintains two balance sources:
+
+### Source of Truth
+
+```text
+TransactionEntry
+```
+
+Immutable ledger records.
+
+### Cached Balance
+
+```text
+LedgerAccount.balance
+```
+
+Used for fast balance retrieval.
+
+Benefits:
+
+- O(1) balance reads
+- Ledger-backed correctness
+
+---
+
+## 🔍 Reconciliation System
+
+Financial systems periodically verify that:
+
+```text
+Cached Balance
+      ==
+Ledger Balance
+```
+
+This project includes reconciliation jobs that:
+
+- Recompute balances from ledger entries
+- Detect inconsistencies
+- Automatically repair corrupted balances
+- Generate audit records
+
+---
+
+## 🔁 Transaction Reversals
+
+Transactions are never deleted.
+
+Instead, reversals create compensating ledger entries.
+
+Example:
+
+```text
+Original:
+A → B : 100
+
+Reversal:
+B → A : 100
+```
+
+This preserves a complete audit trail.
+
+---
+
+## 🧾 Audit Logging
+
+Critical operations are recorded:
+
+- Transfers
+- Reversals
+- Reconciliation corrections
+
+Provides operational traceability and debugging support.
+
+---
+
+# 🧠 Engineering Challenges Solved
+
+| Problem | Solution |
+|----------|----------|
+| Race Conditions | Row-Level Locking |
+| Lost Updates | ACID Transactions |
+| Double Spending | Idempotency Keys |
+| Partial Transfers | Atomic Transactions |
+| Balance Corruption | Reconciliation |
+| Missing Audit Trail | Structured Audit Logs |
+| Duplicate Requests | Reference-Based Idempotency |
+
+---
+
+# 🧪 Testing
+
+The project includes automated tests covering:
+
+### Transfer Processing
+
+- Successful transfers
+- Insufficient funds
+- Invalid transfers
+- Idempotency behavior
+
+### Consistency
+
+- Ledger balance correctness
+- Cached balance correctness
+- Reconciliation repair logic
+
+### Reliability
+
+- Atomic rollback verification
+- Transaction reversal validation
+
+---
+
+# 📈 Concurrency Testing
+
+Load tested using Locust to validate:
+
+- Concurrent transfer processing
+- Row-level locking behavior
+- Balance consistency
+- Transaction correctness under load
+
+Verification performed after testing:
+
+```text
+Ledger Balance == Cached Balance
+```
+
+for all accounts.
+
+---
+
+# 📡 API Endpoints
+
+## Create Transfer
+
+```http
+POST /ledger/transfers/
+```
+
+Example:
+
+```json
+{
+    "sender_id": 1,
+    "receiver_id": 2,
+    "amount": "100",
+    "reference_id": "uuid"
+}
+```
+
+---
+
+## Get Account Balance
+
+```http
+GET /ledger/accounts/{id}/balance/
+```
+
+---
+
+## Get Transaction History
+
+```http
+GET /ledger/accounts/{id}/transactions/
+```
+
+Supports pagination.
+
+---
+
+## Get Transfer Status
+
+```http
+GET /ledger/transfers/{reference_id}/
+```
+
+---
+
+# 🛠 Tech Stack
+
+### Backend
+
+- Python
+- Django
+- Django REST Framework
+
+### Database
+
+- PostgreSQL
+
+### Infrastructure
+
+- Docker
+- Docker Compose
+
+### Testing
+
+- Django Test Framework
+- Locust
+
+---
+
+# 📂 Project Structure
+
+```text
+apps/
+│
+├── ledger/
+│   ├── models.py
+│   ├── services.py
+│   ├── views.py
+│   ├── serializers.py
+│   ├── validators.py
+│   ├── reconciliation.py
+│   ├── ledger_selectors.py
+│   └── audit.py
+│
+└── users/
+```
+
+---
+
+# 🚀 Getting Started
+
+### Clone Repository
 
 ```bash
-git clone <repo-url>
+git clone <repository-url>
 cd ledger_system
 ```
 
-### 2. Setup environment
+### Create Virtual Environment
 
 ```bash
 python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+```
+
+### Activate Environment
+
+```bash
+venv\Scripts\activate
+```
+
+### Install Dependencies
+
+```bash
 pip install -r requirements.txt
 ```
 
-### 3. Migrate DB
+### Run Migrations
 
 ```bash
-python manage.py makemigrations
 python manage.py migrate
 ```
 
-### 4. Run server
+### Start Server
 
 ```bash
 python manage.py runserver
 ```
 
-### 5. Start Redis
+---
 
-```bash
-redis-server
-```
+# 📚 Concepts Demonstrated
 
-### 6. Start Celery worker
-
-```bash
-celery -A ledger_system worker --loglevel=info
-```
+- Double Entry Accounting
+- ACID Transactions
+- Row-Level Locking
+- Concurrency Control
+- Idempotency
+- Reconciliation
+- Audit Logging
+- Transaction Reversals
+- Service Layer Pattern
+- Pagination
+- Load Testing
+- Dockerized Development
 
 ---
 
-## 🔮 Upcoming Features
+# 💼 What This Demonstrates
 
-* Idempotency safety in async systems
-* Rate limiting
-* Fraud detection hooks
-* Webhooks/events
-* Distributed transactions
-* Monitoring dashboards
+This project showcases the ability to design and implement systems that are:
 
----
+- Correct
+- Consistent
+- Auditable
+- Concurrency Safe
+- Production-Oriented
 
-## 🧠 What This Project Demonstrates
-
-* Backend system design
-* Financial correctness guarantees
-* Concurrency handling
-* Performance optimization
-* Production-grade architecture
-* Real-world fintech patterns
+while applying backend engineering principles commonly used in payment and fintech platforms.
 
 ---
 
-## 💼 Why This Matters
+## Performance Results
 
-It demonstrates the ability to design:
+- Load tested with 500 concurrent users using Locust
+- Processed 3,400+ transfer requests
+- Maintained ledger consistency under concurrent load
+- Zero failed financial transactions
+- Zero balance mismatches after reconciliation
 
-```
-Correct + Scalable + Auditable systems
-```
+  
+# 👨‍💻 Author
 
----
-
-## 👨‍💻 Author
-
-Built as a deep dive into backend engineering and financial system design.
-
----
-
-## 📌 Final Note
-
-
-This is a **system design project implemented in code**.
+**Pranav Shinde**
